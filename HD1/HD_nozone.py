@@ -11,18 +11,18 @@ import traci
 import sumolib
 from sumolib import checkBinary
 import optparse
-from gurobipy import *
+# from gurobipy import *
 import numpy as np
 import pandas as pd
 import time
-# Required packages
+import sys
 # Input: the number of patron
 passenger_number = 200
 # Input: the number of vehicle
 taxi_number=10
 
 # Define vehicle related information variables
-df_car = pd.read_excel('./sumo_config/vehicle-information.xlsx', sheet_name='information table')  # 替换为你的文件名和工作表名称
+df_car = pd.read_excel('./sumo_config/vehicle_info_homo.xlsx', sheet_name='information table')
 car_hash_map = dict()  # vehicle initial position
 for index, row in df_car.iterrows():
     car_hash_map[str(row['id'])] = [row['edge']]
@@ -44,10 +44,10 @@ for i in range(taxi_number):
     vehicle_drop[str(i+1)] = []
 
 # Define patron related information variables
-df_pax = pd.read_excel('./sumo_config/patron-information.xlsx', sheet_name='information table')
+df_pax = pd.read_excel('./sumo_config/pax_info_homo.xlsx', sheet_name='basic')
 passenger_hash_map = dict()  # patron information:request_time,location,etc.
 for index, row in df_pax.iterrows():
-    passenger_hash_map[str(row['id'])] = [row['request_time'],{row['edge']:row['pos']},str(row['zone'])]
+    passenger_hash_map[str(row['id'])] = [row['request time'],{row['edge']:row['pos']},str(row['zone'])]
 passenger_hashmap = dict()  # patron status map
 personStep_hashmap = dict()  # patron pick-up record
 depotStep_hashmap = dict()  # patron drop-off record
@@ -56,9 +56,10 @@ for i in range(passenger_number):
     personStep_hashmap[str(i+1)] = -1
     depotStep_hashmap[str(i+1)] = 0
 
-terminal = 'E220'
-terminal_reverse = '-E220'
-
+# terminal edge
+terminal = 'E5103'
+terminal_reverse = '-E5103'
+street_space = 72.8
 # Define the mapping between Junctions and downstream road segments
 data=pd.read_excel("./sumo_config/JunctionToEdge.xlsx",sheet_name=0)
 JunctionToEdge_hashmap=dict(zip(data['key'],data['value']))
@@ -90,9 +91,9 @@ def checkpassenger():
     person_net=list(traci.person.getIDList())
     person_net = sorted(person_net, key=lambda x: int(x[:-1] + x[-2:]))
     for each in person_net:
-        if passenger_hashmap[each]==0 and each not in traci.edge.getLastStepPersonIDs(edgeID='-E220'):
-            passenger_hashmap[each]=1
-        elif passenger_hashmap[each]!=0:
+        if passenger_hashmap[each] == 0 and each not in traci.edge.getLastStepPersonIDs(edgeID=terminal_reverse):
+            passenger_hashmap[each] = 1
+        elif passenger_hashmap[each] != 0:
             continue
     return passenger_hashmap
 
@@ -100,26 +101,26 @@ def checkpassenger():
 def checkcar():
     global car_hashmap
     for key in car_hash_map.keys():
-        car_hashmap[key]=len(car_hash_map[key])
+        car_hashmap[key] = len(car_hash_map[key])
     return car_hashmap
 
 # Distance calculation module
-def getDistance(ef,et,ETP):
-    if ef[0]==':':
-        ef= JunctionToEdge_hashmap[ef]
+def getDistance(ef ,et, ETP):
+    if ef[0] == ':':
+        ef = JunctionToEdge_hashmap[ef]
         EF = net.getEdge(ef)
     else:
         EF = net.getEdge(ef)
-    if et[0]==':':
+    if et[0] == ':':
         et = JunctionToEdge_hashmap[et]
         ET = net.getEdge(et)
     else:
         ET = net.getEdge(et)
-    temp=net.getShortestPath(EF,ET)[1]-ETP[ef]-(472.8-ETP[et])
+    temp = net.getShortestPath(EF,ET)[1]-ETP[ef]-(street_space-ETP[et])
     return temp
 
 # TSP module
-def calculate(dp,countid):
+def calculate(dp, countid):
     path = np.zeros((2 ** countid, countid), np.int32)
     visit = np.full((2 ** countid, countid), -1.0)
     s = 0
@@ -134,7 +135,8 @@ def calculate(dp,countid):
         s = s & (~(1 << index))
     path_ret.append(countid - 1)
     return (distance, path_ret)
-def min_distance(s, init, matrix,count,paths,visited):
+
+def min_distance(s, init, matrix, count, paths, visited):
     if visited[s][init] != -1:
         return visited[s][init]
     if s == (1 << (count - 1)):
@@ -165,7 +167,7 @@ def distribute_batch():
                 if p[p_key] == 1:
                     car_edge = traci.vehicle.getRoadID(c_key)
                     car_pos = traci.vehicle.getLanePosition(c_key)
-                    person_edge=list(passenger_hash_map[p_key][1].keys())[0]
+                    person_edge = list(passenger_hash_map[p_key][1].keys())[0]
                     person_pos = list(passenger_hash_map[p_key][1].values())[0]
                     if car_edge[0] == ':':
                         car_edge = JunctionToEdge_hashmap[car_edge]
@@ -186,52 +188,52 @@ def distribute_batch():
                 p[list(passenger_candidate[each[0]].keys())[0]] = 2
     return car_hash_map
 # matching_algorithm——FCFS-based matching
-def distribute_FIFS():
-    p=checkpassenger()
-    print(p)
-    for key in p.keys():
-        if p[key]==1:
-            c=checkcar()
-            exit_flag = False
-            for each in c.values():
-                if each >= 5:
-                    exit_flag = True
-                else:
-                    exit_flag = False
-                    break
-            if exit_flag==True:
-                print('All vehicles are in services')
-                break
-            else:
-                dis = np.zeros([1, len(car_hash_map)])
-                for c_key in c.keys():
-                    if (c[c_key])<5:
-                        person_edge=list(passenger_hash_map[key][1].keys())[0]
-                        person_pos=list(passenger_hash_map[key][1].values())[0]
-                        car_edge=traci.vehicle.getRoadID(c_key)
-                        car_pos=traci.vehicle.getLanePosition(c_key)
-                        if car_edge[0]==':':
-                            car_edge=JunctionToEdge_hashmap[car_edge]
-                            car_pos=0
-                        temp_distance=net.getShortestPath(net.getEdge(car_edge),net.getEdge(person_edge))[1]#分别获取最短距离
-                        dis[0][int(c_key)-1]=temp_distance-car_pos-(472.8-person_pos)
-                    elif (c[c_key])>=5:
-                        dis[0][int(c_key)-1]=100000000000000000
-                temp=np.argmin(dis[0])+1
-                car_hash_map[str(temp)].append(key)
-                p[key]=2
-                if len(car_hash_map[str(temp)]) == 5:
-                    continue
-        elif p[key]!=1:
-            continue
-    return car_hash_map
+# def distribute_FIFS():
+#     p=checkpassenger()
+#     print(p)
+#     for key in p.keys():
+#         if p[key]==1:
+#             c=checkcar()
+#             exit_flag = False
+#             for each in c.values():
+#                 if each >= 5:
+#                     exit_flag = True
+#                 else:
+#                     exit_flag = False
+#                     break
+#             if exit_flag==True:
+#                 print('All vehicles are in services')
+#                 break
+#             else:
+#                 dis = np.zeros([1, len(car_hash_map)])
+#                 for c_key in c.keys():
+#                     if (c[c_key])<5:
+#                         person_edge=list(passenger_hash_map[key][1].keys())[0]
+#                         person_pos=list(passenger_hash_map[key][1].values())[0]
+#                         car_edge=traci.vehicle.getRoadID(c_key)
+#                         car_pos=traci.vehicle.getLanePosition(c_key)
+#                         if car_edge[0]==':':
+#                             car_edge=JunctionToEdge_hashmap[car_edge]
+#                             car_pos=0
+#                         temp_distance=net.getShortestPath(net.getEdge(car_edge),net.getEdge(person_edge))[1]#分别获取最短距离
+#                         dis[0][int(c_key)-1]=temp_distance-car_pos-(street_space-person_pos)
+#                     elif (c[c_key])>=5:
+#                         dis[0][int(c_key)-1]=100000000000000000
+#                 temp=np.argmin(dis[0])+1
+#                 car_hash_map[str(temp)].append(key)
+#                 p[key]=2
+#                 if len(car_hash_map[str(temp)]) == 5:
+#                     continue
+#         elif p[key]!=1:
+#             continue
+#     return car_hash_map
 
-
-def distribute(Delta,unmatched_request,step):
-    p = checkpassenger()  # 首先，检测乘客状态，只有1的状态表示已经进入路网，但是等待分配状态
+# Batch-based matching algorithm
+def distribute(Delta, unmatched_request, step):
+    p = checkpassenger()  # check patron
     print(p)
     # for key in p.keys():
-    c = checkcar()  # 其次，检测车辆容量，查看是否有多余位置分配给乘客
+    c = checkcar()  # check veh capacity
     exit_flag = False
     for each in c.values():
         if each >= 5:
@@ -240,31 +242,31 @@ def distribute(Delta,unmatched_request,step):
             exit_flag = False
             break
     # unmatched_request = [key for key, value in p.items() if value == 1]
-    if len(unmatched_request) == 0 or exit_flag == True:  # 没人或者车满的情况
+    if len(unmatched_request) == 0 or exit_flag == True:  # nobody or full
         print('nothing occur')
-    elif len(unmatched_request) == 1:  # 非饱和的情况,即每秒恰好有一名乘客出现
-        print('恰好有一个待分配乘客')
-        dis = np.zeros([1, len(car_hash_map)])  # 生成一个1*10矩阵，用于存储乘客到车辆的距离，
+    elif len(unmatched_request) == 1:  # under-saturation
+        print('one patron')
+        dis = np.zeros([1, len(car_hash_map)])  #
         for c_key in c.keys():
-            if (c[c_key]) < 5:  # 由于乘客进入路网之后，信息都为已知确定
+            if (c[c_key]) < 5:  # attain patron's information
                 person_edge = list(passenger_hash_map[unmatched_request[0]][1].keys())[0]
                 person_pos = list(passenger_hash_map[unmatched_request[0]][1].values())[0]
                 car_edge = traci.vehicle.getRoadID(c_key)  #
-                car_pos = traci.vehicle.getLanePosition(c_key)  # 这里需要额外考虑，如果考虑乘客与车辆进行匹配时，车辆刚好处于交叉口处，如何转换为edge
+                car_pos = traci.vehicle.getLanePosition(c_key)  #
                 if car_edge[0] == ':':
                     car_edge = JunctionToEdge_hashmap[car_edge]
-                    car_pos = 0  # 这个可以通过运行再次确认
-                temp_distance = net.getShortestPath(net.getEdge(car_edge), net.getEdge(person_edge))[1]  # 分别获取最短距离
-                dis[0][int(c_key) - 1] = temp_distance - car_pos - (478.2 - person_pos)  # 这个100后面要写的更加generalize
+                    car_pos = 0  #
+                temp_distance = net.getShortestPath(net.getEdge(car_edge), net.getEdge(person_edge))[1]  # get shortest path
+                dis[0][int(c_key) - 1] = temp_distance - car_pos - (street_space - person_pos)  #
             elif (c[c_key]) >= 5:
                 dis[0][int(c_key) - 1] = 1e10
-        if min(dis[0]) <= Delta:  # 如果该乘客距离所有available车辆的位置均超过最大允许，那么该乘客将失去资格
-            temp = np.argmin(dis[0]) + 1  # 获取最近车辆id
+        if min(dis[0]) <= Delta:  # within buffer distance
+            temp = np.argmin(dis[0]) + 1  # attain the nearest veh id
             car_hash_map[str(temp)].append(unmatched_request[0])
-            p[unmatched_request[0]] = 2  # 2表示乘客已经完成分配，后续不参与上述流程
-            print('距离所有车辆都很远',unmatched_request[0])
+            p[unmatched_request[0]] = 2  # 2 indicate finish match
+            print('unmatched request', unmatched_request[0])
     elif len(unmatched_request) > 1:
-        print('有多个待分配乘客，比较紧急情况')
+        print('multiple unmatched_requests')
         for c_key in c.keys():
             if c[c_key] >= 5:
                 continue
@@ -275,18 +277,17 @@ def distribute(Delta,unmatched_request,step):
                         person_edge = list(passenger_hash_map[each][1].keys())[0]
                         person_pos = list(passenger_hash_map[each][1].values())[0]
                         car_edge = traci.vehicle.getRoadID(c_key)  #
-                        car_pos = traci.vehicle.getLanePosition(c_key)  # 这里需要额外考虑，如果考虑乘客与车辆进行匹配时，车辆刚好处于交叉口处，如何转换为edge
+                        car_pos = traci.vehicle.getLanePosition(c_key)  #
                         if car_edge[0] == ':':
                             car_edge = JunctionToEdge_hashmap[car_edge]
-                            car_pos = 0  # 这个可以通过运行再次确认
-                        temp= net.getShortestPath(net.getEdge(car_edge), net.getEdge(person_edge))[
-                            1]  # 分别获取最短距离
+                            car_pos = 0  #
+                        temp = net.getShortestPath(net.getEdge(car_edge), net.getEdge(person_edge))[
+                            1]  #
                         temp_distance = temp - car_pos - (
-                                    478.2 - person_pos)  # 这个100后面要写的更加generalize
-                        print(each+'距离',temp_distance)
-                        if temp_distance<=Delta:
-                            passenger_candidata.append({each:urgent(request=each,vehicle=c_key,step=step)})
-
+                                    street_space - person_pos)  #
+                        print(each+'distance', temp_distance)
+                        if temp_distance <= Delta:
+                            passenger_candidata.append({each: urgent(request=each,vehicle=c_key,step=step)})
                         else:
                             continue
                 print('pax_urgent_pair',passenger_candidata)
@@ -299,8 +300,7 @@ def distribute(Delta,unmatched_request,step):
                 for each in small:
                     car_hash_map[c_key].append(list(passenger_candidata[each[0]].keys())[0])
                     p[list(passenger_candidata[each[0]].keys())[0]] = 2
-
-    # 注意数据结构的分析
+    # Remark: Input and output
     return car_hash_map
 
 
@@ -316,49 +316,49 @@ def addRoute(edgelist,key):
     car_edge=traci.vehicle.getRoadID(vehID=key)
     if car_edge[0]==':':
         car_edge=JunctionToEdge_hashmap[car_edge]
-        car_pos=0
+        car_pos = 0
     else:
         car_pos = traci.vehicle.getLanePosition(vehID=key)
     routeid = [car_edge]+passengerEdgeList+[terminal]
-    posid = [car_pos]+passengerPosList + [960]
+    posid = [car_pos]+passengerPosList + [4886]
     EdgeToPos = dict()
     for i in range(len(routeid)):
         EdgeToPos[routeid[i]] = posid[i]
-    routehash=dict()
+    routehash = dict()
     for i in range(len(routeid)):
-        routehash[i]=routeid[i]
-    dismatrix=[[0]*len(routeid) for _ in range(len(routeid))]
+        routehash[i] = routeid[i]
+    dismatrix = [[0]*len(routeid) for _ in range(len(routeid))]
     for i in range(len(routeid)):
         for j in range(len(routeid)):
-            if i!=j:
-                dismatrix[i][j]=getDistance(routeid[i],routeid[j],EdgeToPos)
-            if i==j:
-                dismatrix[i][j]=0
+            if i != j:
+                dismatrix[i][j] = getDistance(routeid[i],routeid[j],EdgeToPos)
+            if i == j:
+                dismatrix[i][j] = 0
     ret = calculate(dismatrix,len(routeid))
     print(ret)
-    routeNumberid=ret[1]
-    routeEdgeid=list()
-    #routeEdgeid为calculate()带number序号的结果转换为edge
+    routeNumberid = ret[1]
+    routeEdgeid = list()
+    #
     for each in routeNumberid:
         routeEdgeid.append(routehash[each])
-    routePosid=list()
+    routePosid = list()
     for each in routeNumberid:
         routePosid.append(posid[each])
-    routeEdge=list()
+    routeEdge = list()
     for i in range(len(routeEdgeid)):
-        if i<len(routeEdgeid)-2:
+        if i < len(routeEdgeid)-2:
             if i == 0 and routeEdgeid[i] == routeEdgeid[i+1]:
-                x=net.getEdge(routeEdgeid[i])
+                x = net.getEdge(routeEdgeid[i])
                 if routeEdgeid[i][0] == '-':
-                    y=net.getEdge(routeEdgeid[i+1].strip('-'))
+                    y = net.getEdge(routeEdgeid[i+1].strip('-'))
                 else:
-                    y=net.getEdge('-'+routeEdgeid[i+1])
-                routeEdge +=net.getShortestPath(x,y)[0]
+                    y = net.getEdge('-'+routeEdgeid[i+1])
+                routeEdge += net.getShortestPath(x,y)[0]
                 x_EdgeIDList = [SingleEdge.getID() for SingleEdge in routeEdge]
             else:
                 x = net.getEdge(routeEdgeid[i])
                 y = net.getEdge(routeEdgeid[i+1])
-                routeEdge+=net.getShortestPath(x,y)[0]
+                routeEdge += net.getShortestPath(x,y)[0]
                 x_EdgeIDList = [SingleEdge.getID() for SingleEdge in routeEdge]
                 routeEdge.pop()
         elif i==len(routeEdgeid)-2:
@@ -378,6 +378,7 @@ def addRoute(edgelist,key):
     end_time = time.time()
     print('TSP time',end_time-start_time)
     return x_EdgeIDList,routeEdgeid,routePosid
+
 # Routing_algorithm——inbound
 def addRoute_inbound(inbound_demand):
     inboundEdgeList=list()
@@ -385,9 +386,9 @@ def addRoute_inbound(inbound_demand):
         inboundEdgeList.append(list(passenger_hash_map[each][1].keys())[0])
     inboundPosList=list()
     for each in inbound_demand:
-        inboundPosList.append(list(passenger_hash_map[each][1].values())[0])
+        inboundPosList.append(20)
     routeid = [terminal_reverse] + inboundEdgeList
-    posid = [480] + inboundPosList
+    posid = [500] + inboundPosList
     EdgetoPos = dict()
     for i in range(len(routeid)):
         EdgetoPos[routeid[i]] = posid[i]
@@ -475,7 +476,7 @@ def getDepotStep(step):
     passenger_list=traci.person.getIDList()
     if len(passenger_list)!=0:
         for each in passenger_list:
-            if traci.person.getRoadID(personID=each)==terminal and traci.person.getLanePosition(personID=each)>958 and traci.person.getLanePosition(personID=each)<961 and depotStep_hashmap[each]==0:
+            if traci.person.getRoadID(personID=each)==terminal and traci.person.getLanePosition(personID=each)>4884 and traci.person.getLanePosition(personID=each)<4887 and depotStep_hashmap[each]==0:
                 depotStep_hashmap[each]=step
             else:
                 continue
@@ -487,7 +488,7 @@ def inboundStep(step,key):
 
     for each in person_list:
         if depotStep_hashmap[each] == 0 and traci.vehicle.getRoadID(vehID=key) == list(passenger_hash_map[each][1].keys())[0]:
-            if traci.vehicle.getLanePosition(vehID=key)<41 and traci.vehicle.getLanePosition(vehID=key)>39:
+            if traci.vehicle.getLanePosition(vehID=key)<21 and traci.vehicle.getLanePosition(vehID=key)>19:
                 depotStep_hashmap[each] = step
     return depotStep_hashmap
 
@@ -503,7 +504,7 @@ def urgent(request,vehicle,step):
     else:
         EF = net.getEdge(ef)
 
-    distance_time = (net.getShortestPath(EF,ET)[1]-traci.vehicle.getLanePosition(vehID=vehicle)-(472.8-list(passenger_hash_map[request][1].values())[0]))/V
+    distance_time = (net.getShortestPath(EF,ET)[1]-traci.vehicle.getLanePosition(vehID=vehicle)-(street_space-list(passenger_hash_map[request][1].values())[0]))/V
     return unmatched_time-distance_time
 
 def reposition_algorithm(key,step,unmatched_request):
@@ -525,7 +526,7 @@ def run():
     arrival_outcome=list()
     # time_window = 100
     pick_up_list = {'1': [], '2': [], '3': [],'4': [], '5': [], '6': [],'7': [], '8': [], '9': [],'10': []}
-    car_stop = {'1':40,'2':40,'3':40,'4':40,'5':40,'6':40,'7':40,'8':40,'9':40,'10':40}
+    car_stop = {'1':20,'2':20,'3':20,'4':20,'5':20,'6':20,'7':20,'8':20,'9':20,'10':20}
     Delta = 2.5e3
     while traci.simulation.getMinExpectedNumber() > 0:
         traci.simulationStep()
@@ -589,16 +590,16 @@ def run():
                         print('taxi%s in service'%key)
                     hub_edge = traci.edge.getLastStepVehicleIDs(terminal)
                     if key in hub_edge:
-                        if traci.vehicle.getLanePosition(vehID=key) < 959 and traci.vehicle.getLanePosition(vehID=key) > 956:
+                        if traci.vehicle.getLanePosition(vehID=key) < 4885 and traci.vehicle.getLanePosition(vehID=key) > 4882:
                             temp = list(traci.vehicle.getPersonIDList(vehID=key))
-                        elif traci.vehicle.getLanePosition(vehID=key) < 962 and traci.vehicle.getLanePosition(vehID=key) > 959:
+                        elif traci.vehicle.getLanePosition(vehID=key) < 4888 and traci.vehicle.getLanePosition(vehID=key) > 4885:
                             temp = list(traci.vehicle.getPersonIDList(vehID=key))
                             temp = temp + [step]
                             arrival_outcome.append(temp)
 
                             # temp_edge = all_of_edge[random.randint(0, len(all_of_edge) - 1)]
                             traci.vehicle.changeTarget(vehID=key, edgeID=terminal_reverse)
-                            traci.vehicle.setStop(vehID=key, edgeID=terminal_reverse, pos=80, laneIndex=0, startPos=80, duration=3)
+                            traci.vehicle.setStop(vehID=key, edgeID=terminal_reverse, pos=100, laneIndex=0, startPos=100, duration=3)
                             # traci.vehicle.setStop(vehID=key, edgeID=temp_edge, pos=10, laneIndex=0, startPos=10, duration=2)
 
                             if car_flag[key] == -1:
@@ -612,7 +613,7 @@ def run():
                     hub_edge_inverse = traci.edge.getLastStepVehicleIDs(terminal_reverse)
                     if key in hub_edge_inverse:
                         # if traci.vehicle.getLanePosition(vehID=key) < 481 and traci.vehicle.getLanePosition(vehID=key) > 479 and Car_hashmap[key] == -1:
-                        if traci.vehicle.getLanePosition(vehID=key) > 481 and Car_hashmap[key] == -1:
+                        if traci.vehicle.getLanePosition(vehID=key) > 501 and Car_hashmap[key] == -1:
                             inbound_demand = traci.vehicle.getPersonIDList(vehID=key)
                             if len(inbound_demand) != 0:
                                 for each in inbound_demand:
@@ -635,9 +636,9 @@ def run():
                                     temp_edge = car_hash_map[key][0]
                                     traci.vehicle.changeTarget(vehID=key, edgeID=temp_edge)
                                     traci.vehicle.setStop(vehID=key, edgeID=temp_edge,
-                                                          pos=40,
-                                                          laneIndex=0, startPos=40, duration=3)
-                                    car_stop[key] = 40
+                                                          pos=20,
+                                                          laneIndex=0, startPos=20, duration=3)
+                                    car_stop[key] = 20
                                     car_hash_map[key] = [net.getEdge(temp_edge).getID(), '1', '2', '3', '4']
                                 else:
                                     urgent_request = reposition_algorithm(key, step, unmatched_request)
@@ -657,7 +658,7 @@ def run():
                         inbound_depot = traci.edge.getLastStepVehicleIDs(edgeID=car_hash_map[key][0])
 
                         if key in inbound_depot:
-                            if traci.vehicle.getLanePosition(vehID=key) < 41 and traci.vehicle.getLanePosition(vehID=key) > 39 and Car_hashmap[key] == 1:
+                            if traci.vehicle.getLanePosition(vehID=key) < 21 and traci.vehicle.getLanePosition(vehID=key) > 19 and Car_hashmap[key] == 1:
                                 print('finish inbound service')
                                 unmatched_request = [key for key, value in passenger_hashmap.items() if value == 1]
                                 car_flag[key] = -1
@@ -680,7 +681,7 @@ def run():
                                     car_relocate[key] = 1
                                     Car_hashmap[key] = 1
                                     car_stop[key] = list(passenger_hash_map[urgent_request][1].values())[0]
-                    InboundStep=inboundStep(step, key)
+                    InboundStep = inboundStep(step, key)
                     print('record inbound patron alight', InboundStep)
 
         DepotStep = getDepotStep(step)
