@@ -16,5 +16,22 @@ We will examine a single RPaF operator who oversees a fleet of e-hailing vehicle
 
 The simulation framework contains three simulation modules for the operator, patrons, and vehicles. We utilize Simulation of Urban MObility (SUMO) as the tool to develop a customized time-based simulation environment for RPaF services. SUMO is an open-source microscopic simulation software widely used in transportation studies (Huang et al., 2021; Zhu et al., 2020). Specifically, we use the Traci (Traffic Control Interface) of SUMO to manipulate the actions of simulated entities, i.e., the operator, patrons, and vehicles. Accordingly, we devise three interactive modules, as shown in Figure \ref{fig:sti-frame}, which are described in the following subsections.
 
+![Figure 2: Interaction among three simulation modules.](./images/modules.jpg)
+
+![Figure 3: Simulation flow chart of the operator module.](./images/operator.jpg)
+
+![Figure 4: Simulation flow chart of the patron module.](./images/patron.jpg)
+
+![Figure 5: Simulation flow chart of the vehicle module.](./images/vehicle.jpg)
+
+## Comparison with two counterpart feeder services
+
+We now start comparing the proposed RPaF with two counterpart feeder services: (1) the Ride-Sharing as Feeder (RSaF), and (2) the Flexible-Route Feeder-Bus Transit (Flex-FBT). The core distinction among them lies in their matching and dispatching mechanisms as illustrated in Figure 6.
+
+The RSaF does not pool requests but instantly matches and dispatches the available vehicle to pick up the nearest (outbound) request. The vehicle, en route to the initial request, remains available to receive new request assignments until the first passenger boards or the number of assignments reaches the occupancy target $u$. If multiple requests are matched to the vehicle, it follows a proximity-based routing rule (rather than the TSP plan as in our RPaF), by which it always visits the next closest point. The inbound operation of RSaF is identical to the proposed RPaF.
+
+Flex-FBT dispatches vehicles at regular headways and matches the (outbound) requests within each headway to the successive vehicles. The routing of vehicles follows the optimal TSP-tour plan.
+
+![Figure 5: Simulation flow chart of the vehicle module.](./images/schematic diagrams.jpg)
 
 
