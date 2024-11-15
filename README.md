@@ -24,6 +24,7 @@ The simulation framework contains three simulation modules for the operator, pat
 
 ![Figure 5: Simulation flow chart of the vehicle module.](./images/vehicle.jpg)
 
+![RPaF](./vedio_demo/RPaF.gif)
 ## Comparison with two counterpart feeder services
 
 We now start comparing the proposed RPaF with two counterpart feeder services: (1) the Ride-Sharing as Feeder (RSaF), and (2) the Flexible-Route Feeder-Bus Transit (Flex-FBT). The core distinction among them lies in their matching and dispatching mechanisms as illustrated in Figure 6.
