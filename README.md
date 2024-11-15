@@ -35,6 +35,9 @@ Flex-FBT dispatches vehicles at regular headways and matches the (outbound) requ
 
 ![Figure 5: Simulation flow chart of the vehicle module.](./images/schematic_diagrams.jpg)
 
+![RSaF](vedio_demo/RSaF.gif)
+
+![Flex-FBT](vedio_demo/Flex-FBT.gif)
 <span style="color:red;"> **We first open-sourced the code and videos of the three feeder modes under a certain demand distribution in the experimental study. We will continue to open-source the Manhattan real-case study and other codes in the future.**</span>
 
 Note: Our experimental environment is Apple M1 Pro macOS Sonoma Version 14.2 (23C64).
